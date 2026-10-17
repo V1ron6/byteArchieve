@@ -17,7 +17,16 @@ app.use(
 );
 app.use(express.json({ limit: '100kb' }));
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, name: 'byteArchieve' }));
+app.get('/api/health', (_req, res) => res.json(
+{
+   ok: true,
+   name: 'byteArchieve',
+   version:'1.0.0 base',
+   Devteam: 'curiosity',
+   ecosystem: 'Bytecloud'
+   }
+
+          ));
 app.use('/api/auth', authRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/admin', adminRoutes);
@@ -32,4 +41,4 @@ app.use((err, _req, res, _next) => {
 });
 
 const port = process.env.PORT || 4000;
-app.listen(port, () => console.log(`byteArchieve API on :${port}`));
+app.listen(port, () => console.log(`byteArchieve API on localhost:${port}`));
