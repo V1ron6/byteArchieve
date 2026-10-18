@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Ban, Check, Eye, RotateCcw, Trash2, X } from 'lucide-react';
 import { api, openFile, fmtDate } from '../api.js';
-import { FileRow, Empty, ErrorMsg } from '../ui.jsx';
+import { FileRow, FileRowSkeleton, Empty, ErrorMsg, useToast } from '../ui.jsx';
 
 const TABS = ['pending', 'approved', 'rejected', 'users'];
 
 export default function Admin() {
+  const toast = useToast();
   const [tab, setTab] = useState('pending');
   const [stats, setStats] = useState(null);
   const [files, setFiles] = useState([]);
   const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -23,19 +25,40 @@ export default function Admin() {
       setError('');
     } catch (e) {
       setError(e.message);
+    } finally {
+      setLoading(false);
     }
   }, [tab]);
-  useEffect(() => { load(); }, [load]);
 
-  const act = async (fn) => { try { await fn(); await load(); } catch (e) { setError(e.message); } };
+  // switching tabs clears the old list so files never show under the wrong tab
+  useEffect(() => {
+    setLoading(true);
+    setFiles([]);
+    setUsers([]);
+    load();
+  }, [load]);
+
+  const act = async (fn, message) => {
+    try {
+      await fn();
+      if (message) toast(message, 'success');
+      await load();
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
 
   const review = (id, status) => {
     const note = status === 'rejected' ? prompt('Reason (optional, shown to the uploader):') : null;
     if (status === 'rejected' && note === null) return;
-    act(() => api(`/admin/files/${id}`, { method: 'PATCH', body: { status, note } }));
+    act(
+      () => api(`/admin/files/${id}`, { method: 'PATCH', body: { status, note } }),
+      status === 'approved' ? 'File approved and now public' : 'File rejected'
+    );
   };
-  const del = (id) => confirm('Permanently delete this file?') && act(() => api(`/admin/files/${id}`, { method: 'DELETE' }));
-  const ban = (u) => act(() => api(`/admin/users/${u.id}`, { method: 'PATCH', body: { banned: !u.banned } }));
+  const del = (id) => confirm('Permanently delete this file?') && act(() => api(`/admin/files/${id}`, { method: 'DELETE' }), 'File deleted');
+  const ban = (u) =>
+    act(() => api(`/admin/users/${u.id}`, { method: 'PATCH', body: { banned: !u.banned } }), u.banned ? `${u.username} restored` : `${u.username} suspended`);
 
   const count = (k) => stats?.files?.[k]?.count ?? 0;
 
@@ -50,9 +73,9 @@ export default function Admin() {
         <div className="stat"><span>Users</span><b>{stats?.users ?? 0}</b></div>
       </div>
 
-      <div className="tabs">
+      <div className="tabs" role="tablist" aria-label="Review sections">
         {TABS.map((t) => (
-          <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
+          <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
             {t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
@@ -62,13 +85,14 @@ export default function Admin() {
 
       {tab !== 'users' && (
         <div className="queue">
-          {!files.length && <Empty>Nothing here.</Empty>}
+          {loading && [0, 1, 2].map((i) => <FileRowSkeleton key={i} />)}
+          {!loading && !files.length && !error && <Empty>Nothing here.</Empty>}
           {files.map((f) => (
             <FileRow key={f.id} file={f} meta={`Uploaded by ${f.uploader}  ·  ${fmtDate(f.created_at)}${f.review_note ? `  ·  Note: ${f.review_note}` : ''}`}>
-              <button className="btn ghost" onClick={() => openFile(f.id).catch((e) => setError(e.message))}><Eye size={15} /> Preview</button>
+              <button className="btn ghost" onClick={() => openFile(f.id).catch((e) => toast(e.message, 'error'))}><Eye size={15} /> Preview</button>
               {f.status !== 'rejected' && <button className="btn ghost" onClick={() => review(f.id, 'rejected')}><X size={15} /> Reject</button>}
               {f.status !== 'approved' && <button className="btn" onClick={() => review(f.id, 'approved')}><Check size={15} /> Approve</button>}
-              <button className="btn ghost danger" onClick={() => del(f.id)}aria-label="Delete"><Trash2 size={15} /></button>
+              <button className="btn ghost danger" onClick={() => del(f.id)} aria-label="Delete"><Trash2 size={15} /></button>
             </FileRow>
           ))}
         </div>
@@ -76,6 +100,7 @@ export default function Admin() {
 
       {tab === 'users' && (
         <div className="queue">
+          {loading && [0, 1, 2].map((i) => <FileRowSkeleton key={i} />)}
           {users.map((u) => (
             <div className="row" key={u.id}>
               <div className="info">

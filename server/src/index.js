@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import authRoutes from './routes/auth.js';
 import fileRoutes from './routes/files.js';
 import adminRoutes from './routes/admin.js';
+import discoverRoutes from './routes/discover.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -30,6 +31,7 @@ app.get('/api/health', (_req, res) => res.json(
 app.use('/api/auth', authRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/discover', discoverRoutes);
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 

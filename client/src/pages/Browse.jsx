@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Search } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Info, Search, X } from 'lucide-react';
 import { api, API } from '../api.js';
-import { FileCard, DownloadIcon, Empty, ErrorMsg } from '../ui.jsx';
+import { FileCard, FileCardSkeleton, FileModal, DownloadIcon, Empty, ErrorMsg } from '../ui.jsx';
 
 const KINDS = [
   ['all', 'All'],
@@ -19,6 +19,12 @@ export default function Browse() {
   const [data, setData] = useState({ files: [], pages: 0, total: 0, page: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [slow, setSlow] = useState(false);
+  const searchRef = useRef(null);
+
+  // first load = nothing to show yet (skeletons); later loads just dim the grid
+  const first = loading && !data.files.length && !error;
 
   useEffect(() => {
     setLoading(true);
@@ -33,27 +39,65 @@ export default function Browse() {
     return () => clearTimeout(t);
   }, [q, kind, page]);
 
+  // the free-tier API sleeps when idle, so the first request can take a while
+  useEffect(() => {
+    if (!first) { setSlow(false); return undefined; }
+    const t = setTimeout(() => setSlow(true), 4000);
+    return () => clearTimeout(t);
+  }, [first]);
+
+  // "/" jumps to search, like on most docs sites
+  useEffect(() => {
+    if (selected) return undefined;
+    const onKey = (e) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected]);
+
   return (
     <>
       <section className="hero">
-        <span className="pill-count"><i /> {data.total} files · free to download</span>
+        <span className={`pill-count ${first ? 'loading' : ''}`}>
+          <i /> {first ? 'Loading the archive…' : `${data.total} files · free to download`}
+        </span>
         <h1>
           The public archive for <span className="grad">everything you study.</span>
         </h1>
         <p>Notes, past questions, slides and more. Every upload is reviewed before it goes public.</p>
 
-        <div className="searchbox">
+        <div className="searchbox" role="search">
           <Search size={20} aria-hidden="true" />
           <input
+            ref={searchRef}
+            type="search"
+            aria-label="Search files"
             placeholder="Search notes, past questions, slides…"
             value={q}
             onChange={(e) => { setQ(e.target.value); setPage(1); }}
           />
+          {q ? (
+            <button type="button" className="clear-btn" aria-label="Clear search" onClick={() => { setQ(''); setPage(1); searchRef.current?.focus(); }}>
+              <X size={16} />
+            </button>
+          ) : (
+            <kbd aria-hidden="true">/</kbd>
+          )}
         </div>
 
-        <div className="chips">
+        <div className="chips" role="group" aria-label="File type">
           {KINDS.map(([k, label]) => (
-            <button key={k} className={`chip ${kind === k ? 'on' : ''}`} onClick={() => { setKind(k); setPage(1); }}>
+            <button
+              key={k}
+              type="button"
+              className={`chip ${kind === k ? 'on' : ''}`}
+              aria-pressed={kind === k}
+              onClick={() => { setKind(k); setPage(1); }}
+            >
               {label}
             </button>
           ))}
@@ -61,20 +105,32 @@ export default function Browse() {
       </section>
 
       <section className="browse">
+        {slow && (
+          <div className="notice wake" role="status">
+            <Info size={18} aria-hidden="true" />
+            The server was asleep and is waking up. The first visit can take up to a minute.
+          </div>
+        )}
         <ErrorMsg error={error} />
         {!loading && !data.files.length && !error && (
           <Empty>{q ? `Nothing matches "${q}".` : 'No files here yet. Be the first to upload one.'}</Empty>
         )}
 
-        <div className="grid">
-          {data.files.map((f) => (
-            <FileCard key={f.id} file={f}>
-              <a className="icon-btn" href={`${API}/files/${f.id}/download`} aria-label={`Download ${f.title}`}>
-                <DownloadIcon />
-              </a>
-            </FileCard>
-          ))}
-        </div>
+        {first ? (
+          <div className="grid" aria-busy="true">
+            {Array.from({ length: 6 }, (_, i) => <FileCardSkeleton key={i} />)}
+          </div>
+        ) : (
+          <div className={`grid ${loading ? 'busy' : ''}`} aria-busy={loading}>
+            {data.files.map((f) => (
+              <FileCard key={f.id} file={f} onOpen={setSelected}>
+                <a className="icon-btn" href={`${API}/files/${f.id}/download`} aria-label={`Download ${f.title}`}>
+                  <DownloadIcon />
+                </a>
+              </FileCard>
+            ))}
+          </div>
+        )}
 
         {data.pages > 1 && (
           <div className="pager">
@@ -84,6 +140,8 @@ export default function Browse() {
           </div>
         )}
       </section>
+
+      <FileModal file={selected} onClose={() => setSelected(null)} />
     </>
   );
 }

@@ -1,37 +1,47 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ExternalLink, Send, Trash2, UploadCloud } from 'lucide-react';
+import { ExternalLink, FileText, Send, Trash2, UploadCloud, X } from 'lucide-react';
 import { api, putToR2, openFile, fmtSize, fmtDate } from '../api.js';
-import { Badge, FileRow, Empty, ErrorMsg } from '../ui.jsx';
+import { Badge, FileRow, FileRowSkeleton, Empty, ErrorMsg, useToast } from '../ui.jsx';
 
 export default function Upload() {
+  const toast = useToast();
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState('');
-  const [done, setDone] = useState(false);
   const [mine, setMine] = useState([]);
+  const [loadingMine, setLoadingMine] = useState(true);
   const [drag, setDrag] = useState(false);
   const input = useRef();
 
   const load = useCallback(
-    () => api('/files/mine').then((d) => setMine(d.files)).catch((e) => setError(e.message)),
-    []
+    () =>
+      api('/files/mine')
+        .then((d) => setMine(d.files))
+        .catch((e) => toast(e.message, 'error'))
+        .finally(() => setLoadingMine(false)),
+    [toast]
   );
   useEffect(() => { load(); }, [load]);
 
   const pick = (f) => {
     if (!f) return;
     setFile(f);
-    setDone(false);
+    setError('');
     if (!title) setTitle(f.name.replace(/\.[^.]+$/, ''));
+  };
+
+  const clearFile = (e) => {
+    e.stopPropagation();
+    setFile(null);
+    if (input.current) input.current.value = '';
   };
 
   const submit = async (e) => {
     e.preventDefault();
     if (!file) return setError('Choose a file first');
     setError('');
-    setDone(false);
     try {
       setProgress(0);
       const { id, url } = await api('/files/upload-url', {
@@ -40,10 +50,13 @@ export default function Upload() {
       });
       await putToR2(url, file, setProgress);
       await api(`/files/${id}/confirm`, { method: 'POST' });
-      setFile(null); setTitle(''); setDescription(''); setDone(true);
+      setFile(null); setTitle(''); setDescription('');
+      if (input.current) input.current.value = '';
+      toast('Submitted. It will appear in the archive once an admin approves it.', 'success');
       load();
     } catch (err) {
       setError(err.message);
+      toast(err.message, 'error');
     } finally {
       setProgress(null);
     }
@@ -51,10 +64,17 @@ export default function Upload() {
 
   const remove = async (id) => {
     if (!confirm('Delete this file?')) return;
-    try { await api(`/files/${id}`, { method: 'DELETE' }); load(); } catch (e) { setError(e.message); }
+    try {
+      await api(`/files/${id}`, { method: 'DELETE' });
+      toast('File deleted', 'success');
+      load();
+    } catch (e) {
+      toast(e.message, 'error');
+    }
   };
 
   const busy = progress !== null;
+  const pct = Math.round((progress ?? 0) * 100);
 
   return (
     <section className="upload-grid">
@@ -63,16 +83,26 @@ export default function Upload() {
 
         <div
           className={`dropzone ${drag ? 'drag' : ''}`}
+          role="button"
+          tabIndex={0}
+          aria-label="Choose a file to upload"
           onClick={() => input.current.click()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.current.click(); } }}
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
           onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files[0]); }}
         >
           {file ? (
-            <>
-              <strong>{file.name}</strong>
-              <span className="muted small">{fmtSize(file.size)}</span>
-            </>
+            <div className="picked">
+              <FileText size={28} strokeWidth={1.8} className="dz-icon" aria-hidden="true" />
+              <div>
+                <strong>{file.name}</strong>
+                <span className="muted small">{fmtSize(file.size)}</span>
+              </div>
+              <button type="button" className="clear-btn" onClick={clearFile} aria-label="Remove file" disabled={busy}>
+                <X size={16} />
+              </button>
+            </div>
           ) : (
             <>
               <UploadCloud size={32} strokeWidth={1.8} className="dz-icon" aria-hidden="true" />
@@ -94,14 +124,20 @@ export default function Upload() {
 
         <div className="notice">Uploads stay private until an admin approves them.</div>
         <ErrorMsg error={error} />
-        {done && <div className="notice ok">Submitted. It will appear here once reviewed.</div>}
-        {busy && <div className="bar"><div style={{ width: `${Math.round(progress * 100)}%` }} /></div>}
-        <button className="btn block" disabled={busy}>{busy ? `Uploading ${Math.round(progress * 100)}%` : <><Send size={16} /> Submit for review</>}</button>
+        {busy && (
+          <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+            <div style={{ width: `${pct}%` }} />
+          </div>
+        )}
+        <button className="btn block" disabled={busy}>
+          {busy ? `Uploading ${pct}%` : <><Send size={16} /> Submit for review</>}
+        </button>
       </form>
 
       <div className="mine">
         <h3>My uploads</h3>
-        {!mine.length && <Empty>Nothing uploaded yet.</Empty>}
+        {loadingMine && [0, 1, 2].map((i) => <FileRowSkeleton key={i} />)}
+        {!loadingMine && !mine.length && <Empty>Nothing uploaded yet.</Empty>}
         {mine.map((f) => (
           <FileRow
             key={f.id}
@@ -114,7 +150,7 @@ export default function Upload() {
             }
           >
             <Badge status={f.status} />
-            <button className="btn ghost" type="button" onClick={() => openFile(f.id).catch((e) => setError(e.message))}><ExternalLink size={15} /> Open</button>
+            <button className="btn ghost" type="button" onClick={() => openFile(f.id).catch((e) => toast(e.message, 'error'))}><ExternalLink size={15} /> Open</button>
             <button className="btn ghost danger" type="button" onClick={() => remove(f.id)}><Trash2 size={15} /> Delete</button>
           </FileRow>
         ))}

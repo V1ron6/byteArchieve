@@ -69,7 +69,19 @@ GET  /api/admin/stats | /files?status= | /users
 PATCH /api/admin/files/:id            { status, note }
 DELETE /api/admin/files/:id
 PATCH /api/admin/users/:id            { banned }
+GET  /api/discover?source=&q=&page=   books | classics | papers (public)
 ```
+
+## Discover
+`/discover` searches free, legal catalogues through a small proxy (`server/src/routes/discover.js`). Nothing is copied or hosted; cards link to the source.
+
+| source | catalogue | what you get |
+|---|---|---|
+| `books` | Open Library | free-to-read scans on the Internet Archive |
+| `classics` | Project Gutenberg (Gutendex) | public-domain EPUB / HTML |
+| `papers` | OpenAlex | open-access papers, PDF when available |
+
+Results are cached 10 min and the route is limited to 60 requests/min per IP. Set `DISCOVER_CONTACT` (optional) to send a contact email in the User-Agent.
 
 ## Notes
 - Auth is JWT (7 days) in `localStorage`; passwords are bcrypt-hashed. No email flow.
